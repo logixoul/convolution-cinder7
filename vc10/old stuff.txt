@@ -1,0 +1,552 @@
+template<class Ti, class Tk>
+void convolveEdgeCase(Array2D<Ti>& image, Array2D<Tk>& kernel, Array2D<Ti>& result, int x1, int x2, int y1, int y2)
+{
+    Vec2i offset(-kernel.w/2, -kernel.h/2);
+    for(int x=x1; x<x2; x++) {
+        for(int y=y1;y<y2; y++) {
+            Ti sum;
+            for(int i = 0; i<kernel.w; i++)
+            {
+                for(int j = 0; j < kernel.h; j++)
+                {
+                    Vec2i fetchPos(x+i+offset.x,y+j+offset.y);
+                    sum += fetch(image, fetchPos) * kernel(i, j);
+                }
+            }
+            result(x,y) = sum;
+        }
+    }
+}
+
+template<class Ti, class Tk>
+void convolve(Array2D<Ti>& image, Array2D<Tk>& kernel)
+{
+    Array2D<Ti> result(image.w, image.h);
+    convolveEdgeCase(image, kernel, result, 0,                     kernel.w/2,             0,                  image.h);
+    convolveEdgeCase(image, kernel, result, image.w - kernel.w/2,  image.w,                0,                  image.h);
+    convolveEdgeCase(image, kernel, result, kernel.w/2,            image.w - kernel.w/2,   0,                  kernel.h/2);
+    convolveEdgeCase(image, kernel, result, kernel.w/2,            image.w - kernel.w/2,   image.h-kernel.h/2, image.h);
+    int x1 = kernel.w / 2, x2 = image.w - kernel.w / 2, y1 = kernel.h / 2, y2 = image.h - kernel.h / 2;
+
+	for(int x=x1; x<x2; x++) {
+        for(int y=y1;y<y2; y++) {
+            Ti sum;
+            Tk* kernelPtr = &kernel.data[0];
+            int kX1 = x-kernel.w/2,kX2 = x+kernel.w/2;
+            int kY1 = y-kernel.h/2,kY2 = y+kernel.h/2;
+            for(int ky = kY1; ky <= kY2; ky++)
+            {
+				Ti* imagePtr = &image(kX1, ky);
+				Ti* end = &image(kX2, ky);
+				while(imagePtr <= end)
+				{
+					sum += (*imagePtr++) * (*kernelPtr++);
+				}
+            }
+            result(x,y) = sum;
+        }
+    }
+    image = result;
+}
+
+void manipSaturize()
+{
+    for(int x=0; x<image.w; x++) {
+        for(int y=0;y<image.h; y++) {
+            Vec3f& val = image(x, y);
+
+            Vec3f original = val;
+            float m = std::min(std::min(val.x, val.y), val.z);
+            const float d=20;
+            if(m==val.x) val.x /= d;
+            else if(m==val.y) val.y /= d;
+            if(m==val.z) val.z /= d;
+
+			image(x,y)=val.normalized() * original.length();
+        }
+    }
+}
+
+void showKernel(kernels::Kernel k)
+{
+	glDisable(GL_TEXTURE_2D);
+	glUseProgram(0);
+	float bx=App::get()->getWindowWidth() / (float)k.w / 2;
+	float by=App::get()->getWindowHeight() / (float)k.h / 2;
+	for(int i = 0; i < k.w; i++) for(int j = 0; j < k.h; j++)
+	{
+		float kVal = k(i,j);
+		glColor4f(kVal, kVal, kVal, 1);
+		glRectf(i * bx, j * by, (i+1)*bx, (j+1)*by);
+	}
+}
+
+namespace kernels {
+    typedef Array2D<float> Kernel;
+    const int numAngles = 360;
+    vector<Kernel> crosses;
+
+    void normalize(Kernel& kernel)
+    {
+        float sum = 0;
+        for(int i=0; i < kernel.w; i++) for(int j = 0; j < kernel.h; j++) sum+=kernel(i, j);
+        for(int i=0; i < kernel.w; i++) for(int j = 0; j < kernel.h; j++) kernel(i, j) /= sum;
+    }
+
+    void make()
+    {
+        for(int angle = 0; angle < numAngles; angle++)
+        {
+            /*Kernel cross(13);
+            for(int i=0;i<cross.w;i++)
+            {
+                vec2 v(i - cross.w / 2, 0);
+                rotate(v, (float)twoPi * angle / (float)numAngles);
+                v = max(vec2(-cross.w/2),min(vec2(cross.w/2-1), v));
+				vec2 v1 = v + vec2(cross.w / 2);
+				rotate(v, pi / 2);
+				vec2 v2 = v + vec2(cross.w / 2);
+                cross(round(v1.x), round(v1.y)) = sqrt(1.0f/(1+abs(i-cross.w/2)));
+				cross(round(v2.x), round(v2.y)) = sqrt(1.0f/(1+abs(i-cross.w/2)));
+            }
+			//cross(cross.w/2,cross.w/2)*=2;
+            normalize(cross);
+            crosses.push_back(cross);*/
+        }
+    }
+}
+kernels::Kernel c(1);
+
+kernels::make();
+
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+glColor4f(1,1,1,.5);
+//showKernel(kernels::crosses[0]);
+glColor4f(1,1,1,1);
+glDisable(GL_BLEND);
+
+
+//////////////////////////////////////
+
+void boxBlur(Array2D<Vec3f> const& in, Array2D<Vec3f>& out, int r)
+{
+	const float sq = r*2+1;
+	for(int y = 0; y < in.h; y++)
+	{
+		Vec3f sum = Vec3f::zero();
+		for(int x = -r; x <= r; x++)
+		{
+			int x_ = max(x, 0);
+			sum += in(x_, y);
+		}
+		for(int x = 0; x < r; x++)
+		{
+			out(y, x) = sum / sq;
+			sum -= in(0, y);
+			sum += in(x + r + 1, y);
+		}
+		Vec3f* outp = &out(y, r);
+		Vec3f const *rowp = &in(r, y);
+		Vec3f const* endLoop = &in(in.w-r-1, y);
+		rowp -= r * in.xStep(); endLoop -= r * in.xStep(); int addrAdd = (2 * r + 1) * in.xStep();
+		//for(int x = r; x < in.w - r - 1; x++)
+		for(; rowp < endLoop;)
+		{
+			*outp = sum / sq;
+			sum -= rowp[0];
+			sum += rowp[addrAdd];
+			rowp += in.xStep();
+			outp += out.yStep();
+		}
+		for(int x = in.w-r-1; x < in.w; x++)
+		{
+			out(y, x) = sum / sq;
+			sum -= in(x - r, y);
+			sum += in(in.w - 1, y);
+		}
+	}
+}
+
+void newBlur(Array2D<Vec3f>& in, Array2D<Vec3f>& out, int r)
+{
+	const float sq = (r+1)*(r+1);
+	for(int y = 0; y < in.h; y++)
+	{
+		Vec3f sum = Vec3f::zero();
+		Vec3f diff = Vec3f::zero();
+		for(int x = -r; x <= r; x++)
+		{
+			int x_ = max(x, 0);
+			sum += in(x_, y) * (r+1-abs(x));
+			diff += (x<=0?-1:1) * in(x_, y);
+		}
+		diff += in(r + 1, y);
+		for(int x = 0; x < in.w; x++)
+		{
+			out(y, x) = sum / sq;
+			sum += diff;
+			int left = max(0, x-r);
+			int right = min(in.w - 1, x+r+2);
+			int middle = min(in.w - 1, x+1);
+			diff += in(left, y);
+			diff -= 2*in(middle, y);
+			diff += in(right, y);
+		}
+	}
+}
+
+//////////////////
+
+template<class T>
+static T Filmic(T c)
+{
+	//T x = apply(x-0.004f, [](float& f){return max(0.f,f);});
+	//return (x*(6.2*x+.5))/(x*(6.2*x+1.7)+0.06);
+	return c;//pow(c/(c+1),3);
+}
+
+void profile()
+{
+	static int numIterations = 0;
+	static int startTime = clock();
+	numIterations++;
+	if(numIterations > 30)
+	{
+		cout << "time: " << (clock() - startTime) / (float)CLOCKS_PER_SEC << endl;
+		exit(0);
+	}
+}
+
+void manip()
+{
+    for(int x=0; x<image.w; x++) {
+        for(int y=0;y<image.h; y++) {
+            Vec3f& val = image(x, y);
+            //val=max(Vec3f(0.0f), val-0.1f);
+            //val = pow(val, Vec3f(1.1f));
+            //val += Vec3f(val.g, val.b, val.r) * pow(sin(0.1f*clock()/(float)CLOCKS_PER_SEC),3);
+
+            /*float m = std::min(std::min(val.r, val.g), val.b);
+            const float d=1.000;
+            if(m==val.r) val.r /= d;
+            else if(m==val.g) val.g /= d;
+            if(m==val.b) val.b /= d;*/
+			if(val != Vec3f::zero())
+			{
+				//auto l = length(val);
+				//val = (val / l) * std::min(l, 10000.f);
+				image(x,y)=val.normalized() * lerp(1.0f, val.length(), 0.5f);
+			}
+        }
+    }
+}
+
+/*Array2D<Vec4f> forSurface(image.Size());
+forxy(image) {auto v3 = toDraw(p)+bloomSurface(p); forSurface(p)=Vec4f(v3, 1.0); }
+Surface32f surface((float*)&forSurface.data[0], forSurface.w, forSurface.h, forSurface.w*4*sizeof(float),
+	SurfaceChannelOrder::RGBA);
+ci::writeImage("C:/test.hdr", surface);*/
+
+void SelectionSort(vector<float*> &num)
+{
+	static float sentinelMinValue = 100000;
+	static float* sentinelMin = &sentinelMinValue;
+	int numLength = num.size() / 2;
+	for(int i = 0; i <= numLength; i++)
+	{
+		float** minIter = &sentinelMin;
+		for(int j = i+1; j < num.size(); ++j)
+			if(less(num[j], *minIter))
+				minIter = &num[j];
+		swap(*minIter, num[i]);
+	}
+}
+
+//////////////////////////
+
+template<FetchFunc fetchFunc>
+Vec3f fetchBilinear_(Array2D<Vec3f>& src, Vec2f const& pos) {
+	Vec2i intPos(pos);
+	Vec2f uvRatio = pos - intPos;
+	auto at00 = fetchFunc(src, intPos.x,intPos.y);
+	auto at10 = fetchFunc(src, intPos.x+1,intPos.y);
+	auto at01 = fetchFunc(src, intPos.x,intPos.y+1);
+	auto at11 = fetchFunc(src, intPos.x+1,intPos.y+1);
+	auto xInterp = (at00 + (at10-at00) * uvRatio.x);
+	auto yInterp = (at01 + (at11-at01) * uvRatio.x);
+	return xInterp + (yInterp - xInterp) * uvRatio.y;
+}
+
+/*Vec3f fetchBilinear_noCheck(Array2D<Vec3f>& src, Vec2f const& pos) {
+	Vec2i intPos(pos);
+	Vec2f uvRatio = pos - intPos;
+	Vec3f* ptr = &src(intPos);
+	auto at00 = ptr[0];//fetchFunc(src, intPos.x,intPos.y);
+	auto at10 = ptr[1];//fetchFunc(src, intPos.x+1,intPos.y);
+	auto at01 = ptr[src.w];//fetchFunc(src, intPos.x,intPos.y+1);
+	auto at11 = ptr[src.w+1];//fetchFunc(src, intPos.x+1,intPos.y+1);
+	auto xInterp = (at00 + (at10-at00) * uvRatio.x);
+	auto yInterp = (at01 + (at11-at01) * uvRatio.x);
+	return xInterp + (yInterp - xInterp) * uvRatio.y;
+}*/
+
+
+Vec3f fetchBilinear(Array2D<Vec3f>& src, Vec2f const& pos) {
+	if(pos.x < 0.0f || pos.y < 0.0f || pos.x >= src.w - 2.0f || pos.y >= src.h - 2.0f)
+	{
+		return fetchBilinear_<fetch1>(src, pos);
+	}
+	else
+	{
+		return fetchBilinear_<fetch_NoCheck>(src, pos);
+	}
+}
+
+
+============
+non-threaded fluid:
+void fluid()
+	{
+		GETINT(fluidG, "", 10);
+		GETFLOAT(fluidVelocity, "step=.01", 1);
+		GETFLOAT(fluidSteer, "step=.01", .01);
+		Array2D<Vec3f> result(image.w, image.h, Vec3f::zero());
+		static Struct str;
+		float g = 1.f/fluidG;
+		//g *= twoPi;
+		vector<Vec2f> directions;
+		for(int i = 0; i < 1000; i++)
+		{
+			float h = i/1000.f;
+			//if(h > .5f) { if(fmod(h, g) < g/2) h-=.5f-g/2.f; }
+			//else { if(fmod(h, g) > g/2.f) h+=.5f+g/2.f; }
+			Vec2f offset = fromPolar(Vec2f(fluidVelocity, h * twoPi));
+			directions.push_back(offset);
+		}
+		forxy(image) {
+			Vec3f& c = fetch(image, p);
+			if(c.x+c.y+c.z < 0.001f)
+				continue;
+			Vec3f ab = str.mat.transformVec(c);
+			float hue = atan2(ab.y, ab.x);
+			float saturation = ab.xy().length();
+			float brightness = ab.z;
+			Vec2f& offset = directions[(directions.size()-1)*(hue / twoPi + .5f)] * (saturation+.5);
+			
+			ab.rotateZ(saturation*fluidSteer);
+			c = str.inv.transformVec(ab);
+			
+			auto oldL = offset.length();
+			offset.y += pow(brightness+saturation*2,3) + 1;
+			offset = offset.safeNormalized() * oldL;
+			c/=2;
+			aaPoint(result, Vec2f(p) + offset, c);
+			aaPoint(result, Vec2f(p) + offset/2, c);
+		}
+		image.data.swap(result.data);
+	}
+
+	PFL(bloom blurs){ 
+			float coef1=0.731489014669946;
+			float base1=0.0314049586244252;
+			float coef2=0.268510985330054;
+			float base2=0.00347525811667193;
+			GETINT(bloomIterations,"min=0 max=10", 1);
+			for(int i = 0; i < bloomIterations; i++){
+			auto bloomSurface1=bloomSurface;
+			expTest2D(bloomSurface, 1-pow(1-base1,bloomAlpha));
+			expTest2D(bloomSurface1, 1-pow(1-base2,bloomAlpha));
+			int end=bloomSurface.offsetOf(bloomSurface.w-1,bloomSurface.h-1);
+			for(int i=0;i<end;i++){ bloomSurface.data[i]=coef1*bloomSurface.data[i]+coef2*bloomSurface1.data[i]; }
+			}
+	}
+
+	
+/*
+template<class T, class Layout = XSequential>
+class Array2D
+{
+    public:
+    typedef T value_type;
+    std::vector<T> data;
+    int w, h;
+
+	ci::Vec2i Size() const { return ci::Vec2i(w, h); }
+
+    Array2D(int w, int h, T const& defaultValue = T())
+    {
+        this->w = w;
+        this->h = h;
+        this->data = vector<T>(w * h, defaultValue);
+    }
+	Array2D(Vec2i s, T const& defaultValue = T())
+    {
+        this->w = s.x;
+        this->h = s.y;
+        this->data = vector<T>(w * h, defaultValue);
+    }
+    Array2D(int dimension)
+    {
+        this->w = this->h = dimension;
+        this->data = vector<T>(w * h);
+    }
+
+	template<class NewLayout> Array2D<T, NewLayout>& WithLayout() { return (Array2D<T, NewLayout>&)*this; }
+
+	template<class TCoord>
+	T& operator()(TCoord x, TCoord y) { return data[Layout::offset(*this, x, y)]; }
+    T& operator()(int x, int y) { return data[Layout::offset(*this, x, y)]; }
+	T const& operator()(int x, int y) const { return data[Layout::offset(*this, x, y)]; }
+    T& operator()(ci::Vec2i const& p) { return data[Layout::offset(*this, p.x, p.y)]; }
+	T const& operator()(ci::Vec2i const& p) const { return data[Layout::offset(*this, p.x, p.y)]; }
+
+	int offsetOf(int x, int y) const { return Layout::offset(*this, x, y); }
+	int offsetOf(ci::Vec2i const& p) const { return Layout::offset(*this, p.x, p.y); }
+	bool contains(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
+	bool contains(Vec2i const& p) const { return p.x >= 0 && p.y >= 0 && p.x < w && p.y < h; }
+
+	int xStep() const { return Layout::offset(*this, 1, 0) - Layout::offset(*this, 0, 0); }
+	int yStep() const { return Layout::offset(*this, 0, 1) - Layout::offset(*this, 0, 0); }
+};*/
+
+
+#if 0
+			GETFLOAT(expBase, "group=fft min=0 max=1 step=.01", .9);
+			GETFLOAT(falloffPower, "group=fft min=0 step=.01", 1);
+
+			for(Vec2i p(0, 0); p.x < out.w; p.x++)
+			{
+				for(p.y = 0; p.y < out.h; p.y++)
+				{
+					//if(p.x > image.w / 2 || p.y > image.h / 2) continue;
+					//auto& a = out(p);
+					//auto& b = out(p.x, image.h - 1- p.y);
+					//auto& c = out(image.w - 1 - p.x, p.y);
+					//auto& d = out(image.Size() - Vec2i(1, 1) - p);
+
+					//float mul = pow(expBase, pow(p.length(), falloffPower));
+					//Prec mul = kernel_fs(p).x*bloomOpacity;
+					//auto toAll = [&](function<void(V&)> const& func) { func(a); /*func(b); func(c); func(d);*/ };
+					//toAll([&](V& f){f*=mul;});
+					reinterpret_cast<complex<Prec>& >(out(p)) *= reinterpret_cast<complex<Prec>& >(kernel_fs(p));
+				}
+			}
+#endif
+
+/*
+	static Array2D<V3> out(image.w, image.h / 2 + 1);
+	static int dims[] = {image.w, image.h};
+	static auto plan1 = fftwf_plan_many_dft_r2c(2, dims, 3,
+		/*in*/ (Prec*)toDraw.data,
+		/*inembed*/ NULL,
+		/*istride*/ 3,
+		/*idist*/ 1,
+		/*out*/ (fftwf_complex*)out.data,
+		/*onembed*/ NULL,
+		/*ostride*/ 3,
+		/*odist*/ 1,
+		FFTW_MEASURE);
+	static auto plan2 = fftwf_plan_many_dft_c2r(2, dims, 3,
+		/*in*/ (fftwf_complex*)out.data,
+		/*inembed*/ NULL,
+		/*istride*/ 3,
+		/*idist*/ 1,
+		/*out*/ (Prec*)bloomSurface.data,
+		/*onembed*/ NULL,
+		/*ostride*/ 3,
+		/*odist*/ 1,
+		FFTW_MEASURE);
+	PFL(planExecute) fftwf_execute(plan1);
+	for(int i = 0; i < out.area; i++)
+	{
+		auto& k = (complex<Prec>&)(kernel_fs.data[i]);
+		(complex<Prec>&)(out.data[i].a) *= k;
+		(complex<Prec>&)(out.data[i].b) *= k;
+		(complex<Prec>&)(out.data[i].c) *= k;
+	}
+	PFL(planExecute) fftwf_execute(plan2);
+*/
+
+#if 0
+	void doFFT()
+	{
+		// todo: fftw_malloc
+		// todo: sizes that are products of small factors are transformed most efficiently
+		// todo: FFTW_PATIENT
+		static Array2D<V> lum(image.w, image.h);
+		static Array2D<V> out(image.w, image.h);
+		Vec3f toLum(.333, .333, .333);
+		for(int i = 0; i < lum.data.size(); i++) lum.data[i] = V(dot(toDraw.data[i], toLum), 0);
+		static FFTPlan<Prec> plan1(lum, out, FFTW_FORWARD, FFTW_MEASURE);
+		static FFTPlan<Prec> plan2(out, lum, FFTW_BACKWARD, FFTW_MEASURE);
+		GETFLOAT(expBase, "group=fft min=0 max=1 step=.01", .9);
+		GETFLOAT(falloffPower, "group=fft min=0 step=.01", 1);
+		plan1.execute();
+		for(Vec2i p(0, 0); p.x < image.w / 2; p.x++)
+		{
+			for(p.y = 0; p.y < image.h / 2; p.y++)
+			{
+				if(p.x > image.w / 2 || p.y > image.h / 2) continue;
+				auto& a = out(p);
+				auto& b = out(p.x, image.h - 1- p.y);
+				auto& c = out(image.w - 1 - p.x, p.y);
+				auto& d = out(image.Size() - Vec2i(1, 1) - p);
+
+				float mul = pow(expBase, pow(p.length(), falloffPower));
+				auto toAll = [&](float& f) { a*=f; /*b*= f;*/ c*=f;d*=f; };
+				toAll(mul);
+			}
+		}
+		plan2.execute();
+		GETBOOL(showFFT, "group=fft", false);
+		auto& toShow = showFFT ? out : lum;
+		complexArrayToImage(toShow, bloomSurface);
+	}
+#endif
+
+/*
+	struct UnitOfWork
+	{
+		int channel;
+		FFT::RArray data_sd;
+		FFT::CArray data_fd;
+			
+		vector< function<void()> > tasks;
+		UnitOfWork(int channel)
+		{
+			data_sd = FFT::RArray(r_array.Size());
+			data_fd = FFT::CArray(c_array.Size());
+			FFT &planF_=planF; // VC++ workaround
+			FFT &planB_=planB;
+			FFT &kernel_fs_=kernel_fs;
+			tasks +=
+				[&]{ for(int i = 0; i < data_sd.area; i++) data_sd.data[i] = toDraw.data[i].ptr()[channel]; },
+				[&]{ PFL(planExecute) planF_.execute(data_sd, data_fd); },
+				[&]{ for(int i = 0; i < data_fd.area; i++) comp(data_fd.data[i]) *= comp(kernel_fs_.data[i]); },
+				[&]{ PFL(planExecute) planB_.execute(data_fd, data_sd); },
+				[&]{ for(int i = 0; i < data_sd.area; i++) bloomSurface.data[i].ptr()[channel] = data_sd.data[i]; };
+		}
+	};
+	UnitOfWork u0(0), u1(1), u2(2);
+	auto tasks = concat(u0.tasks, concat(u1.tasks, u2.tasks));
+*/
+
+/*
+	auto func = [&](int channel) {
+		//FFT::RArray lum(r_array.Size(), nofill());
+		//FFT::CArray out(c_array.Size(), nofill());
+		auto& lum = lums[channel];
+		auto& out = outs[channel];
+		for(int i = 0; i < lum.area; i++) lum.data[i] = toDraw.data[i].ptr()[channel];
+		PFL(planExecute) planF.execute(lum, out);
+		for(int i = 0; i < out.area; i++) comp(out.data[i]) *= comp(kernel_fs.data[i]);
+		PFL(planExecute) planB.execute(out, lum);
+		for(int i = 0; i < lum.area; i++) bloomSurface.data[i].ptr()[channel] = lum.data[i];
+	};
+	boost::thread t(func, 0);
+	//func(0);
+	func(1);
+	func(2);
+	t.join();
+*/

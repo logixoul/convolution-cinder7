@@ -1,0 +1,95 @@
+uniform sampler2D tex;
+uniform sampler2D bloomTex;
+uniform vec2 tex_size;
+uniform bool doit;
+uniform float bloomOpacity;
+vec2 tc_ = gl_TexCoord[0].xy;
+uniform mat3 toHSL;
+uniform mat3 toHSLinv;
+
+vec3 Filmic(vec3 c)
+{
+	vec3 x = max(vec3(0.0),c-0.004);
+	return (x*(6.2*x+.5))/(x*(6.2*x+1.7)+0.06);
+}
+
+vec3 Reinhard(vec3 c)
+{
+	c=max(vec3(0),c);
+	c/=c+1;
+	return c;
+}
+float R(float f)
+{
+	const float Lwhite = 10.0;
+	return (1+f/(Lwhite*Lwhite)) *
+		f / (f+1);
+}
+vec3 Reinhard2(vec3 c)
+{
+	float L = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+
+	return c * R(L) / L;
+}
+vec3 Reinhard3(vec3 c)
+{
+	float L = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+
+	return c * R(L) / L;
+}
+
+// http://www.opengl.org/discussion_boards/showthread.php/177520-Mipmap-level-calculation-using-dFdx-dFdy
+float getLod(vec2 texture_coordinate)
+{
+    vec2  dx_vtc        = dFdx(texture_coordinate);
+    vec2  dy_vtc        = dFdy(texture_coordinate);
+    float delta_max_sqr = max(dot(dx_vtc, dx_vtc), dot(dy_vtc, dy_vtc));
+
+    return 0.5 * log2(delta_max_sqr); // == log2(sqrt(delta_max_sqr));
+}
+
+vec3 getPixel(sampler2D t, vec2 texCoord)
+{
+	if(#b("hi_q", "", false))
+		return texture2DLod(t, texCoord, getLod(texCoord)).rgb;
+	else
+		return texture2D(t, texCoord).rgb;
+}
+
+void main()
+{
+	vec2 tc = tc_-vec2(.5);
+	float distort = exp(#f("distort_log_", "step=.01", -1.02));
+	tc = normalize(tc) * asin(length(tc) * distort) / distort + vec2(.5);
+	
+	vec3 primary = getPixel(tex, tc);
+	float primaryL = (dot(vec3(.333), primary)-.5) /1000;
+	vec2 primaryV = vec2(primaryL)+(primary.xy-.5)/100;
+	
+	if(#b("test", "", false))primaryV*=0;
+	
+
+	vec3 c = vec3(0.0);
+	float diffraction = #f("diffraction_", "step=.001", .002);
+	vec2 tc_primaryV = tc+primaryV;
+	c.r += getPixel(tex, (tc_primaryV-.5)*diffraction*100+.5).r;
+	c.g += getPixel(tex, (tc_primaryV-.5)*diffraction*99+.5).g;
+	c.b += getPixel(tex, (tc_primaryV-.5)*diffraction*98+.5).b;
+
+
+	if(#b("rh", "", false))c=Reinhard(c);
+	vec3 bloom = getPixel(bloomTex, tc) /*### * bloomOpacity ###*/ / 100.0f;
+	
+	float mainOpacity = pow(2.0, #f("mainOpacity_log_", "step=.1", -2.7));
+	c*= mainOpacity;
+	if(#b("bloomRh", "", false))bloom=Reinhard(bloom);
+	float brightness = pow(2.0, #f("brightness_log_", "step=.1", -0.8));
+	c*=brightness;bloom*=brightness;
+	vec3 rgb = c+bloom;
+	if(#b("screenBlend_","",false))rgb=mix(c,vec3(1.0), bloom);
+	if(#b("rh2", "", false))rgb=Reinhard2(rgb);
+	//rgb*=rgb.gbb;
+	//rgb+=fwidth(rgb)*3;
+
+	gl_FragColor = vec4(rgb, 1);
+}

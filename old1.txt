@@ -1,0 +1,507 @@
+//#define GLM_FORCE_INLINE
+#define GLM_FORCE_SSE2
+#include "util.h"
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include "colorspaces.h"
+#include "sat.h"
+#include "picopng.h"
+#include <cinder/app/AppBasic.h>
+#include <cinder/audio/Output.h>
+#include <cinder/audio/Callback.h>
+#include <cinder/CinderMath.h>
+#include "cinder/params/Params.h"
+#include "Dragging.cpp"
+//#include <GL/glew.h>
+//#include <GL/glut.h>
+#include "shader.h"
+#include <boost/bind.hpp>
+using namespace ci::app;
+
+#define GLM_SWIZZLE
+#include <glm/glm/glm.hpp>
+#include <glm/glm/gtc/matrix_transform.hpp>
+using namespace std;
+using namespace glm;
+
+const int imageSize = 200;
+const float windowScale = 2;
+Array2D<vec3> image = Array2D<vec3>(imageSize, imageSize);
+unsigned int tex;
+namespace shaders
+{
+	int a;
+}
+Array2D<vec4> pic(0);
+
+namespace kernels {
+    typedef Array2D<float> Kernel;
+    Kernel sharpen(9);
+    Kernel scatter(13);
+    const int numAngles = 360;
+    vector<Kernel> crosses;
+
+    void normalize(Kernel& kernel)
+    {
+        float sum = 0;
+        for(int i=0; i < kernel.w; i++) for(int j = 0; j < kernel.h; j++) sum+=kernel(i, j);
+        for(int i=0; i < kernel.w; i++) for(int j = 0; j < kernel.h; j++) kernel(i, j) /= sum;
+    }
+
+	Kernel getBox(int w, int h)
+	{
+		Kernel box(w, h);
+		for(int i=0;i<box.w;i++)for(int j=0;j<box.h;j++)
+            box(i,j)=1.0;
+        normalize(box);
+		return box;
+	}
+
+	Kernel getRandom(int w, int h)
+	{
+		Kernel k(w, h);
+		for(int i=0;i<k.w;i++)for(int j=0;j<k.h;j++)
+            k(i,j)=randFloat()-0.4f;
+        normalize(k);
+		return k;
+	}
+
+    void make()
+    {
+        scatter(0, 0) = 1;
+        scatter(scatter.w-1, 0) = 1;
+        scatter(0, scatter.h-1) = 1;
+        scatter(scatter.w-1, scatter.h-1) = 1;
+        normalize(scatter);
+
+        for(int i=0;i<sharpen.w;i++)for(int j=0;j<sharpen.h;j++)
+            sharpen(i,j)=-1.0/(sharpen.w*sharpen.h-1);
+        sharpen(sharpen.w/2,sharpen.h/2) = 2 * 1.2;
+        normalize(sharpen);
+
+        for(int angle = 0; angle < numAngles; angle++)
+        {
+            Kernel cross(9);
+            for(int i=0;i<cross.w;i++)
+            {
+                vec2 v(i - cross.w / 2, 0);
+                rotate(v, (float)twoPi * angle / (float)numAngles);
+                v = max(vec2(-cross.w/2),min(vec2(cross.w/2-1), v));
+				vec2 v1 = v + vec2(cross.w / 2);
+				rotate(v, pi / 2);
+				vec2 v2 = v + vec2(cross.w / 2);
+                cross(v1.x, v1.y) = 1;
+				cross(v2.x, v2.y) = 1;
+            }
+            normalize(cross);
+            crosses.push_back(cross);
+        }
+    }
+}
+
+template<class Ti>
+Ti& fetch(Array2D<Ti>& src, ivec2 pos)
+{
+    static Ti black(0.0);
+    //if(pos.x < 0 || pos.y < 0 || pos.x >= image.w || pos.y >= image.h) return black;
+	pos.x %= src.w;
+	pos.y %= src.h;
+
+    if(pos.x < 0) pos.x += src.w;
+    if(pos.y < 0) pos.y += src.h;
+    return src(pos.x,pos.y);
+}
+
+template<class Ti>
+Ti& fetch_NoCheck(Array2D<Ti>& src, int x, int y)
+{
+    return src(x,y);
+}
+
+template<class Ti>
+inline Ti& fetch1(Array2D<Ti>& src, int x, int y)
+{
+    return fetch(src, ivec2(x, y));
+}
+
+typedef vec3& (*FetchFunc)(Array2D<vec3>&, int, int);
+
+template<FetchFunc fetchFunc>
+vec3 fetchBilinear_(Array2D<vec3>& src, vec2 const& pos) {
+	int x = std::floor(pos.s);
+	int y = std::floor(pos.t);
+	float u_ratio = pos.s - x;
+	float v_ratio = pos.t - y;
+	float u_opposite = 1 - u_ratio;
+	float v_opposite = 1 - v_ratio;
+	return (fetchFunc(src, x,y) * u_opposite  + fetchFunc(src, x+1,y)   * u_ratio) * v_opposite +
+		(fetchFunc(src, x,y+1)  * u_opposite  + fetchFunc(src, x+1,y+1) * u_ratio) * v_ratio;
+}
+
+vec3 fetchBilinear(Array2D<vec3>& src, vec2 const& pos) {
+	if(pos.x < 0.0f || pos.y < 0.0f || pos.x >= src.w - 2.0f || pos.y >= src.h - 2.0f)
+	{
+		return fetchBilinear_<fetch1>(src, pos);
+	}
+	else
+	{
+		return fetchBilinear_<fetch_NoCheck>(src, pos);
+	}
+}
+
+template<FetchFunc fetchFunc>
+void aaPoint(Array2D<vec3>& dest, vec2 pos, vec3 c) {
+	int x = std::floor(pos.s);
+	int y = std::floor(pos.t);
+	float u_ratio = pos.s - x;
+	float v_ratio = pos.t - y;
+	float u_opposite = 1 - u_ratio;
+	float v_opposite = 1 - v_ratio;
+
+	//FetchFunc fetchFunc = getFetchFunc(dest, x, y);
+
+	fetchFunc(dest, x, y) += (u_opposite * v_opposite) * c;
+	fetchFunc(dest, x+1, y) += (u_ratio * v_opposite) * c;
+	fetchFunc(dest, x, y+1) += (u_opposite * v_ratio) * c;
+	fetchFunc(dest, x+1, y+1) += (u_ratio * v_ratio) * c;
+}
+
+template<class Ti, class Tk>
+void convolveEdgeCase(Array2D<Ti>& image, Array2D<Tk>& kernel, Array2D<Ti>& result, int x1, int x2, int y1, int y2)
+{
+    ivec2 offset(-kernel.w/2, -kernel.h/2);
+    for(int x=x1; x<x2; x++) {
+        for(int y=y1;y<y2; y++) {
+            Ti sum;
+            for(int i = 0; i<kernel.w; i++)
+            {
+                for(int j = 0; j < kernel.h; j++)
+                {
+                    ivec2 fetchPos(x+i+offset.x,y+j+offset.y);
+                    sum += fetch(image, fetchPos) * kernel(i, j);
+                }
+            }
+            result(x,y) = sum;
+        }
+    }
+}
+
+void fluid()
+{
+    Array2D<vec3> result(image.w, image.h);
+    for(int i = 0; i < image.w; i++)
+    {
+        for(int j = 0; j < image.h; j++)
+        {
+            vec3& c = fetch(image, ivec2(i, j));
+            vec3& dest = fetch(result, ivec2(i, j));
+            RgbF& rgb = reinterpret_cast<RgbF&>(c);
+            HslF hsl(rgb);
+            vec2 offset = fromPolar(hsl.l, hsl.h * twoPi);
+			offset *= 5.f;
+            dest += fetchBilinear(image, vec2(i, j) + offset);
+			//aaPoint<fetch1<vec3> >(result, vec2(i, j) + offset, c);
+        }
+    }
+    image = result;
+}
+
+template<class Ti, class Tk>
+void convolve(Array2D<Ti>& image, Array2D<Tk>& kernel)
+{
+    Array2D<Ti> result(image.w, image.h);
+    convolveEdgeCase(image, kernel, result, 0,                     kernel.w/2,             0,                  image.h);
+    convolveEdgeCase(image, kernel, result, image.w - kernel.w/2,  image.w,                0,                  image.h);
+    convolveEdgeCase(image, kernel, result, kernel.w/2,            image.w - kernel.w/2,   0,                  kernel.h/2);
+    convolveEdgeCase(image, kernel, result, kernel.w/2,            image.w - kernel.w/2,   image.h-kernel.h/2, image.h);
+    int x1 = kernel.w / 2, x2 = image.w - kernel.w / 2, y1 = kernel.h / 2, y2 = image.h - kernel.h / 2;
+
+	for(int x=x1; x<x2; x++) {
+        for(int y=y1;y<y2; y++) {
+            Ti sum;
+            Tk* kernelPtr = &kernel.data[0];
+            int kX1 = x-kernel.w/2,kX2 = x+kernel.w/2;
+            int kY1 = y-kernel.h/2,kY2 = y+kernel.h/2;
+            for(int ky = kY1; ky <= kY2; ky++)
+            {
+				Ti* imagePtr = &image(kX1, ky);
+				Ti* end = &image(kX2, ky);
+				while(imagePtr <= end)
+				{
+					sum += (*imagePtr++) * (*kernelPtr++);
+				}
+            }
+            result(x,y) = sum;
+        }
+    }
+    image = result;
+}
+
+void manip()
+{
+    for(int x=0; x<image.w; x++) {
+        for(int y=0;y<image.h; y++) {
+            vec3& val = image(x, y);
+            //val=max(vec3(0.0f), val-0.1f);
+            //val = pow(val, vec3(1.1f));
+            //val += vec3(val.g, val.b, val.r) * pow(sin(0.1f*clock()/(float)CLOCKS_PER_SEC),3);
+
+            /*float m = std::min(std::min(val.r, val.g), val.b);
+            const float d=1.000;
+            if(m==val.r) val.r /= d;
+            else if(m==val.g) val.g /= d;
+            if(m==val.b) val.b /= d;*/
+			if(val == vec3(0))
+				image(x, y) = vec3(0);
+			else
+			{
+				image(x,y)=normalize(val) * mix(1.0f, length(val), 0.1f);
+			}
+        }
+    }
+}
+
+void manipSaturize()
+{
+    for(int x=0; x<image.w; x++) {
+        for(int y=0;y<image.h; y++) {
+            vec3& val = image(x, y);
+
+            vec3 original = val;
+            float m = std::min(std::min(val.r, val.g), val.b);
+            const float d=20;
+            if(m==val.r) val.r /= d;
+            else if(m==val.g) val.g /= d;
+            if(m==val.b) val.b /= d;
+
+            image(x,y)=normalize(val) * length(original);
+        }
+    }
+}
+
+void profile()
+{
+	static int numIterations = 0;
+	static int startTime = clock();
+	numIterations++;
+	if(numIterations > 30)
+	{
+		cout << "time: " << (clock() - startTime) / (float)CLOCKS_PER_SEC << endl;
+		exit(0);
+	}
+}
+
+kernels::Kernel c(1);
+int foo;
+static kernels::Kernel rk = kernels::getRandom(5,5);
+
+void showKernel(kernels::Kernel k)
+{
+	glDisable(GL_TEXTURE_2D);
+	float bx=image.w / (float)k.w;
+	float by=image.h / (float)k.h;
+	for(int i = 0; i < k.w; i++) for(int j = 0; j < k.h; j++)
+	{
+		float kVal = k(i,j);
+		glColor4f(kVal, 0, 0, .5);
+		glRectf(i * bx, j * by, (i+1)*bx, (j+1)*by);
+	}
+}
+
+void render()
+{
+
+}
+
+unsigned int makeTex(int w, int h)
+{
+    unsigned int tex;
+    glGenTextures(1, &tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGB, GL_FLOAT, NULL);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    return tex;
+}
+void foo_(Vec2i i){}
+
+class Test{
+	void test()
+	{
+		//boost::bind(this, &Test::a)();
+	}
+	void a() {}
+};
+class AudioGenerativeApp : public DragApp {
+ public:
+	Dragging dragging;
+	ci::params::InterfaceGl params;
+	vector<float> phases;
+	int playFrame;
+	float smoothen;
+
+	AudioGenerativeApp()
+		: dragging(*this, foo_)
+	{
+		//bind(this, &AudioGenerativeApp::onDrag);
+	}
+
+	float compression;
+	void sineWave( uint64_t inSampleOffset, uint32_t ioSampleCount, ci::audio::Buffer32f *ioBuffer ) {
+		for( int  i = 0; i < ioSampleCount; i++ ) {
+			float val = 0;
+			for(int y = 0; y < phases.size(); y++)
+			{
+				phases[y] += pow(1.1f,y) / 200.0f;//pow(y,1.f) / 500.0f;
+				float uphurl = (float)sin( phases[y] * 2.0f * M_PI ) * image(playFrame, std::min(y / (float)phases.size(),1.f) * image.h).b;
+				val += uphurl;
+			}
+			//val = pow(val, 2);
+			//compression = mix(compression, abs(val), 0.001f);
+			//val = .2 * val / compression
+			compression = mix(compression, val, smoothen); val = compression/3.0;
+			
+			float& ch1 = ioBuffer->mData[i*ioBuffer->mNumberChannels];
+			float& ch2 = ioBuffer->mData[i*ioBuffer->mNumberChannels + 1];
+			ch1 = ch2 = val;
+		}
+	}
+
+	void keyDown(KeyEvent e)
+	{
+		if(e.getChar() == 'd')
+		{
+			params.isVisible() ? params.hide() : params.show();
+		}
+	}
+
+	void onDrag(Vec2i pos)
+	{
+		int radius = 10;
+		static float hue = 0;
+		hue = fmod(hue + 0.01, 1);
+		
+		vec2 oldObjPos = (vec2)(ivec2&)(dragging.lastPos/windowScale);
+		vec2 newObjPos = (vec2)(ivec2&)(getMousePos()/windowScale);
+		for(float i = 0; i <= 1; i+=0.1)
+		{
+			vec2 objPos = mix(oldObjPos, newObjPos, i);
+			for(int x = objPos.x - radius; x <= objPos.x + radius; x++)
+			{
+				for(int y = objPos.y - radius; y <= objPos.y + radius; y++)
+				{
+					if(&image(x, y) < &image(0, 0) || &image(x, y) > &image(image.w-1, image.h-1))
+						continue;
+					float value = 1-smoothstep(radius-1.f/10, (float)radius, length(vec2(x, y)-objPos));
+					value = std::max(0.f, value);
+					image(x, y) = mix(image(x, y), (vec3&)FromHSL(HslF(hue, 1, .5f)), value);
+				}
+			}
+		}
+	}
+
+	void setup()
+	{
+		params = ci::params::InterfaceGl( "App parameters", ci::Vec2i( 200, 200 ) );
+		params.addParam("smoothen", &smoothen, "min=0.001 max=1 step=0.001");
+		params.hide();
+		
+		compression = 1;
+		playFrame = 0;
+		for(int i = 0; i < 10; i++) phases.push_back(0);
+		setWindowSize(image.w*windowScale, image.h*windowScale);
+	
+		int g=1;
+		for(int i=0;i<image.w;i+=g)for(int j=0;j<image.h;j+=g)
+		{
+			vec3 r(randFloat(), randFloat(), randFloat());
+			for(int x = i; x < std::min(i+g,image.w);x++)for(int y=j;y<std::min(j+g, image.h);y++)
+				{
+					image(x,y)=r;
+				}
+		}
+		kernels::make();
+		ci::gl::setMatricesWindow(getWindowSize());
+
+		tex = makeTex(image.w, image.h);
+
+		//trapFP();
+		loadPNG("test.png", pic);
+		shaders::a = loadShader("a", "a");
+
+		//ci::audio::Output::play( ci::audio::createCallback( this, &AudioGenerativeApp::sineWave ) );
+	}
+
+	void draw()
+	{
+		console() << compression << endl;
+		glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
+		glClampColorARB(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
+
+		glUseProgram(shaders::a);
+		glUniform2f(glGetUniformLocation(shaders::a, "tex_size"), image.w, image.h);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image.w, image.h, GL_RGB, GL_FLOAT, &image.data[0]);
+		glClearColor(1,1,1,0);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glBegin(GL_QUADS);
+		glTexCoord2f(0, 0); glVertex2f(0, 0);
+		glTexCoord2f(1, 0); glVertex2f(getWindowWidth(), 0);
+		glTexCoord2f(1, 1); glVertex2f(getWindowWidth(), getWindowHeight());
+		glTexCoord2f(0, 1); glVertex2f(0, getWindowHeight());
+		glEnd();
+
+		//ci::gl::color(ci::Color(1,0,0));
+		//ci::gl::drawLine(ci::Vec2f(playFrame, 0), ci::Vec2f(playFrame, getWindowHeight()));
+		
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glColor4f(1,1,1,.5);
+		//showKernel(rk);
+		glColor4f(1,1,1,1);
+		glDisable(GL_BLEND);
+
+		if(params.isVisible())
+			ci::params::InterfaceGl::draw();
+	}
+
+	void update()
+	{
+		playFrame++; if(playFrame >= image.w - 1) playFrame = 0;
+		//::profile();
+		foo+=1;
+		//convolve(image, kernels::scatter);
+		//convolve(image, kernels::crosses[foo%kernels::numAngles]);
+		fluid();
+		manip();
+		//manipSaturize();
+		//if(foo%10==0)rk=kernels::getRandom(15,15);
+		static float f;params.addParam("f", &f, "min=0 max=1 step=0.001");
+		static float hueMix;params.addParam("hueMix", &hueMix, "min=0 max=1 step=0.001");
+		satBlur(image, 2);
+		forxy(image) {
+			HslF hsl((RgbF&)image(i,j));
+			hsl.h = fmod(hsl.h + (1-hsl.l) * f, 1);
+			image(i,j)=(vec3&)FromHSL(hsl);
+		}
+		/*
+		Array2D<vec3> copy = image;
+		satBlur(copy, 5);
+		forxy(image) {
+			HslF hsl((RgbF&)image(i,j));
+			HslF blurredHsl((RgbF&)copy(i,j));
+			float newHue = blurredHsl.h;
+			hsl.h = mix(hsl.h, newHue, hueMix);
+			image(i,j)=(vec3&)FromHSL(hsl);
+		}*/
+		//auto copy = image; satBlur(copy, 5); forxy(image) image(i, j) += copy(i, j);
+
+		satSharpen(image, 4);
+		
+		//convolve(image, kernels::getBox(5, 5));
+		//convolve(image, rk);
+		//convolve(image, kernels::sharpen);
+	}
+};
+
+CINDER_APP_BASIC( AudioGenerativeApp, ci::app::RendererGl )

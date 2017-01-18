@@ -1,0 +1,23 @@
+	float compression;
+	void sineWave( uint64_t inSampleOffset, uint32_t ioSampleCount, ci::audio::Buffer32f *ioBuffer ) {
+		for( int  i = 0; i < ioSampleCount; i++ ) {
+			float val = 0;
+			for(int y = 0; y < phases.size(); y++)
+			{
+				phases[y] += pow(1.1f,y) / 200.0f;//pow(y,1.f) / 500.0f;
+				float uphurl = (float)sin( phases[y] * 2.0f * M_PI ) * image(playFrame, std::min(y / (float)phases.size(),1.f) * image.h).z;
+				val += uphurl;
+			}
+			//val = pow(val, 2);
+			//compression = mix(compression, abs(val), 0.001f);
+			//val = .2 * val / compression
+			compression = lerp(compression, val, smoothen); val = compression/3.0;
+			
+			float& ch1 = ioBuffer->mData[i*ioBuffer->mNumberChannels];
+			float& ch2 = ioBuffer->mData[i*ioBuffer->mNumberChannels + 1];
+			ch1 = ch2 = val;
+		}
+	}
+
+	
+	ci::audio::Output::play( ci::audio::createCallback( this, &AudioGenerativeApp::sineWave ) );
