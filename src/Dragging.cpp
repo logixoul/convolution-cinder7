@@ -6,14 +6,14 @@ using namespace ci::app;
 using namespace std;
 
 // copied from GetTinderBoxWorking
-Dragging::Dragging(function<void(Vec2i)> onDrag)
+Dragging::Dragging(function<void(ivec2)> onDrag)
 {
 	this->onDrag = onDrag;
 }
 	
 void Dragging::update()
 {
-	if(active) onDrag(Vec2i::zero());
+	if(active) onDrag(ivec2());
 }
 
 bool Dragging::down(MouseEvent e)

@@ -3,19 +3,20 @@
 #include "StdAfx.h"
 #include "util.h"
 
-Vec3f& fetch(Array2D<Vec3f>& src, Vec2i const& pos);
-void aaPoint(Array2D<Vec3f>& dest, Vec2f const& pos, Vec3f const& c);
+vec3& fetch(Array2D<vec3>& src, ivec2 const& pos);
+void aaPoint(Array2D<vec3>& dest, vec2 const& pos, vec3 const& c);
 
-extern Matrix33f toHsv;
-extern Matrix33f toHsvInv;
+extern mat3 toHsv;
+extern mat3 toHsvInv;
 
-float getSaturation(Vec3f const& v);
-void rotateHue_ip(Vec3f& v, float angle);
+float getSaturation(vec3 const& v);
+void rotateHue_ip(vec3& v, float angle);
 
-struct HsvStruct
+/*struct HsvStruct
 {
-	Vec2f transform(Vec3f const& v)
+	vec2 transform(vec3 const& v)
 	{
-		return Vec2f(toHsv.m00*v.x + toHsv.m01*v.y + toHsv.m02*v.z, toHsv.m10*v.x + toHsv.m11*v.y + toHsv.m12*v.z);
+		return vec2(toHsv.m00*v.x + toHsv.m01*v.y + toHsv.m02*v.z, toHsv.m10*v.x + toHsv.m11*v.y + toHsv.m12*v.z);
 	}
 };
+*/

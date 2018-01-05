@@ -6,11 +6,11 @@ enum MouseButton { Left, Right };
 
 struct Dragging
 {
-	function<void(Vec2i)> onDrag;
-	Dragging(function<void(Vec2i)> onDrag);
+	function<void(ivec2)> onDrag;
+	Dragging(function<void(ivec2)> onDrag);
 	bool active; 
 	
-	Vec2i lastPos;
+	ivec2 lastPos;
 public:
 	map<MouseButton, bool> isDown;
 	void update();

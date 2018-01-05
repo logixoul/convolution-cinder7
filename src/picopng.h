@@ -2,4 +2,4 @@
 #include "stdafx.h"
 #include "util.h"
 
-void loadPNG(string filename, Array2D<Vec4f>& result);
+void loadPNG(string filename, Array2D<vec4>& result);

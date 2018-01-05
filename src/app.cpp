@@ -22,7 +22,7 @@ using namespace render;
 
 typedef FFT_T<float> FFT;
 
-class AudioGenerativeApp : public AppBasic {
+class SApp : public App {
  public:
 	void mouseDown(MouseEvent e) { input::mouseDown(e); }
 	void mouseUp(MouseEvent e) { input::mouseUp(e); }
@@ -64,38 +64,38 @@ class AudioGenerativeApp : public AppBasic {
 		GETFLOAT(fluidVelocity, "step=.01", .01);
 		GETFLOAT(fluidSteer, "step=.001", 0*.01);
 		GETFLOAT(fluidGravity, "step=.0001", .0);
-		Array2D<Vec3f> result(image.w, image.h, Vec3f::zero());
+		Array2D<vec3> result(image.w, image.h, vec3());
 		/*GETBOOL(OLD, "", true);*/bool OLD = false;
-		auto func = [&](Array2D<Vec3f>& dest, int xStart, int xEnd) { 
-			Vec2i p;
+		auto func = [&](Array2D<vec3>& dest, int xStart, int xEnd) { 
+			ivec2 p;
 			for(p.x = xStart; p.x < xEnd; p.x++) for(p.y = 0; p.y < image.h; p.y++)
 			{
-				Vec3f& c = image(p);
+				vec3& c = image(p);
 				if(c.x+c.y+c.z < 0.001f)
 					continue;
-				Vec3f ab = toHsv.transformVec(c);
+				vec3 ab = toHsv * c;
 				float hue = atan2(ab.y, ab.x);
-				float saturation = ab.xy().length();
+				float saturation = length(vec2(ab));
 				float brightness = ab.z;
-				Vec2f offset = ab.xy() * (fluidVelocity * (saturation+.5));
-				//Vec2f offset = ab.xy() * (fluidVelocity * (brightness+30));
+				vec2 offset = vec2(ab) * (fluidVelocity * (saturation+.5f));
+				//vec2 offset = ab.xy() * (fluidVelocity * (brightness+30));
 				
 				if(OLD) {
-					ab.rotateZ(saturation*fluidSteer);
-					c=toHsvInv.transformVec(ab);
+					//ab.rotateZ(saturation*fluidSteer);
+					//c=toHsvInv.transformVec(ab);
 				} else rotateHue_ip(c, saturation * fluidSteer);
-					//c.rotate(Vec3f::one(), saturation*fluidSteer);
+					//c.rotate(vec3::one(), saturation*fluidSteer);
 				
 				offset.y += fluidGravity*(pow(brightness+saturation*2,3) + 1);
 				
-				/*Vec2f pp=p;int times=10;c/=times;offset/=times;
+				/*vec2 pp=p;int times=10;c/=times;offset/=times;
 				for(int i=0;i<10;i++, pp+=offset)aaPoint(dest, pp, c);*/
 				c/=2;
-				aaPoint(dest, Vec2f(p) + offset, c);
-				aaPoint(dest, Vec2f(p) + offset/2, c);
+				aaPoint(dest, vec2(p) + offset, c);
+				aaPoint(dest, vec2(p) + offset/2.0f, c);
 			}
 		};
-		boost::thread th1(func, ref(result), 0, image.w / 2);
+		std::thread th1(func, ref(result), 0, image.w / 2);
 		func(result, image.w / 2, image.w);
 		th1.join();
 
@@ -108,10 +108,10 @@ class AudioGenerativeApp : public AppBasic {
 		forxy(out)
 		{
 			FFT::Complex& val = in(p);
-			out(p) = (Vec3f&)hsvToRGB(Vec3f(
+			out(p) = (vec3&)hsvToRgb(vec3(
 				atan2(val.y, val.x)/twoPi+.5, // hue
 				1.0, // sat
-				val.length())); // value
+				length(val))); // value
 		}
 	}
 
@@ -138,7 +138,8 @@ class AudioGenerativeApp : public AppBasic {
 			auto pp = p;
 			auto func = [&]() {
 				//if(pp.length() < radius) kernel(p).x = one.x;//pow(pp.length() / radius, 10) * one.x;
-				kernel(p) += exp(-pp.lengthSquared()*sigmaMul);
+				//kernel(p) += exp(-pp.lengthSquared()*sigmaMul);
+				kernel(p) += exp(-dot(vec2(pp), vec2(pp))*sigmaMul);
 			};
 			func();
 			pp.x = image.w - 1 - pp.x;
@@ -189,11 +190,11 @@ class AudioGenerativeApp : public AppBasic {
 		
 		for(int channel = 0; channel < 3; channel++)
 		{
-			PFL(fftCopyAndMul) for(int i = 0; i < lum.area; i++) lum.data[i] = toDraw.data[i].ptr()[channel];
+			PFL(fftCopyAndMul) for(int i = 0; i < lum.area; i++) lum.data[i] = toDraw.data[i][channel];
 			PFL(planExecute) planF.execute(lum, out);
 			PFL(fftCopyAndMul) for(int i = 0; i < out.area; i++) comp(out.data[i]) *= comp(kernel_fs.data[i]);
 			PFL(planExecute) planB.execute(out, lum);
-			PFL(fftCopyAndMul) for(int i = 0; i < lum.area; i++) bloomSurface.data[i].ptr()[channel] = lum.data[i];
+			PFL(fftCopyAndMul) for(int i = 0; i < lum.area; i++) bloomSurface.data[i][channel] = lum.data[i];
 		}
 		GETBOOL(showFFT, "group=fft", false);
 		if(showFFT)
@@ -216,7 +217,7 @@ class AudioGenerativeApp : public AppBasic {
 				toDraw.data[i] = c;
 			}
 		};
-		boost::thread t(func, 0, image.area/2);
+		std::thread t(func, 0, image.area/2);
 		func(image.area/2, image.area);
 		t.join();
 		copy(toDraw.begin(), toDraw.end(), bloomSurface.begin());
@@ -228,8 +229,8 @@ class AudioGenerativeApp : public AppBasic {
 		GETFLOAT(sprayAlpha, "min=0.0 step=.1", .1);
 		forxy(image) {
 			auto& c = image(p);
-			auto pp = Vec2f(p.y, p.x) * (pic.w / (float)image.w);
-			if(pic.contains(pp)) c = lerp(c, pic(pp).xyz()*spray, pic(pp).w*sprayAlpha);
+			auto pp = vec2(p.y, p.x) * (pic.w / (float)image.w);
+			if(pic.contains(pp)) c = lerp(c, vec3(pic(pp))*spray, pic(pp).w*sprayAlpha);
 		}
 	}
 
@@ -246,8 +247,8 @@ class AudioGenerativeApp : public AppBasic {
 		PFL(post) post();
 		PFL(fft)
 			doFFT_rgb();
-		PFL(trim) forxy(image) if(p.x < 10 || p.y < 10 || image.w-p.x < 10 || image.h - p.y < 10) image(p) = Vec3f::zero();
+		PFL(trim) forxy(image) if(p.x < 10 || p.y < 10 || image.w-p.x < 10 || image.h - p.y < 10) image(p) = vec3();
 	}
 };
 
-CINDER_APP_BASIC( AudioGenerativeApp, ci::app::RendererGl )
+CINDER_APP( SApp, ci::app::RendererGl )

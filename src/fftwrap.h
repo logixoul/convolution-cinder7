@@ -5,7 +5,7 @@
 template<class T> struct FFTBase
 {
 	typedef T Prec;
-	typedef Vec2<T> Complex;
+	typedef vec2 Complex;
 	typedef T Real;
 	typedef Array2D<Complex> CArray;
 	typedef Array2D<Real> RArray;
@@ -43,21 +43,14 @@ private:
 
 template<> struct FFT_T<double> : FFTBase<double> {
 	fftw_plan p;
-	FFT_T(Array2D<Vec2d>& in, Array2D<Vec2d>& out, int direction, int flags)
+	FFT_T(Array2D<dvec2>& in, Array2D<dvec2>& out, int direction, int flags)
 	{
 		p = fftw_plan_dft_2d(in.w, in.h, (fftw_complex*)&in.data[0], (fftw_complex*)&out.data[0], direction, flags);
 	}
 	void execute() { fftw_execute(p); }
 };
 
-template<class T>
-inline std::complex<T> const& comp(Vec2<T> const& a)
+inline std::complex<float>& comp(vec2 const& a)
 {
-	return (std::complex<T> const&)a;
-}
-
-template<class T>
-inline std::complex<T>& comp(Vec2<T>& a)
-{
-	return (std::complex<T>&)a;
+	return (std::complex<float>&)a;
 }

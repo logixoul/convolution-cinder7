@@ -534,7 +534,7 @@ int decodePNG(std::vector<unsigned char>& out_image, unsigned long& image_width,
   return decoder.error;
 }
 
-void loadPNG(string filename, Array2D<Vec4f>& result)
+void loadPNG(string filename, Array2D<vec4>& result)
 {
   std::vector<unsigned char> buffer, image;
   loadFile(buffer, filename);
@@ -542,9 +542,9 @@ void loadPNG(string filename, Array2D<Vec4f>& result)
   
   int error = decodePNG(image, w, h, buffer.empty() ? 0 : &buffer[0], (unsigned long)buffer.size());
   int index=0;
-  result = Array2D<Vec4f>(w, h);
+  result = Array2D<vec4>(w, h);
   for(int i = 0; i < w; i++)for(int j = 0; j < h; j++) {
-		result(i,j) = Vec4f(image[index], image[index+1], image[index+2], image[index+3]) / 255.0f;
+		result(i,j) = vec4(image[index], image[index+1], image[index+2], image[index+3]) / 255.0f;
 		index+=4;
   }
 }

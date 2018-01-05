@@ -4,8 +4,8 @@
 #include "misc.h"
 #include "gl.h"
 
-static ci::gl::Texture tex;
-static ci::gl::Texture bloomTex;
+static ci::gl::TextureRef tex;
+static ci::gl::TextureRef bloomTex;
 
 namespace shaders
 {
@@ -20,8 +20,17 @@ namespace render
 	{
 		shaders::a = Shader("a", "a");
 		gl::Texture::Format fmt;fmt.setInternalFormat(GL_RGBA16F);
-		bloomTex = gl::Texture(image.w, image.h, fmt);
-		tex = gl::Texture(image.w, image.h, fmt);
+		bloomTex = gl::Texture::create(image.w, image.h, fmt);
+		tex = gl::Texture::create(image.w, image.h, fmt);
+	}
+
+	static void drawRect() {
+		auto ctx = gl::context();
+
+		ctx->getDrawTextureVao()->bind();
+		//ctx->getDrawTextureVbo()->bind(); // this seems to be unnecessary
+
+		ctx->drawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
 
 	void renderApp()
@@ -30,7 +39,7 @@ namespace render
 		glClampColor(GL_CLAMP_VERTEX_COLOR_ARB, GL_FALSE);
 		glClampColor(GL_CLAMP_FRAGMENT_COLOR_ARB, GL_FALSE);
 
-		tex.bind(0);
+		tex->bind(0);
 		//glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
 		//GETINT(maxAnisotropy, "min=0 max=32", 16);
 		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAnisotropy);
@@ -39,19 +48,19 @@ namespace render
 		//glGenerateMipmap(GL_TEXTURE_2D);
 		//tex.setMinFilter(GL_LINEAR_MIPMAP_LINEAR);
 		
-		tex.setWrap(GL_CLAMP, GL_CLAMP);
-		bloomTex.bind(0);
+		tex->setWrap(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+		bloomTex->bind(0);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image.w, image.h, GL_RGB, GL_FLOAT, &bloomSurface.data[0]);
-		bloomTex.setWrap(GL_CLAMP, GL_CLAMP);
-		tex.bind(0);
-		bloomTex.bind(1);
+		tex->setWrap(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+		tex->bind(0);
+		bloomTex->bind(1);
 		glClearColor(0,0,0,0);
 		gl::enableAlphaBlending();
 		glClear(GL_COLOR_BUFFER_BIT);
 		glUseProgram(shaders::a.id);
 		shaders::a.SendConfigUniforms();
-		glUniformMatrix3fv(glGetUniformLocation(shaders::a.id, "toHSL"), 1, false, toHsv);
-		glUniformMatrix3fv(glGetUniformLocation(shaders::a.id, "toHSLinv"), 1, false, toHsvInv);
+		glUniformMatrix3fv(glGetUniformLocation(shaders::a.id, "toHSL"), 1, false, (float*)&toHsv);
+		glUniformMatrix3fv(glGetUniformLocation(shaders::a.id, "toHSLinv"), 1, false, (float*)&toHsvInv);
 		glUniform1i(glGetUniformLocation(shaders::a.id, "tex"), 0);
 		glUniform1i(glGetUniformLocation(shaders::a.id, "bloomTex"), 1);
 		
@@ -61,16 +70,16 @@ namespace render
 
 		glUniform2f(glGetUniformLocation(shaders::a.id, "tex_size"), image.w, image.h);
 		
-		glMatrixMode(GL_MODELVIEW);
-		ci::gl::setMatricesWindow(windowWidth, windowHeight);
-		glPushMatrix();
-		glScalef(zoom,zoom,1);
-		glBegin(GL_QUADS);
+		gl::setMatricesWindow(ivec2(1, 1));
+		drawRect();
+		//glScalef(zoom,zoom,1);
+		/*glBegin(GL_QUADS);
 		glTexCoord2f(0, 0); glVertex2f(0, 0);
 		glTexCoord2f(1, 0); glVertex2f(windowWidth, 0);
 		glTexCoord2f(1, 1); glVertex2f(windowWidth, windowHeight);
 		glTexCoord2f(0, 1); glVertex2f(0, windowHeight);
 		glEnd();
-		glPopMatrix();
+		glPopMatrix();*/
+
 	}
 }

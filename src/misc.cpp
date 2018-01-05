@@ -1,14 +1,14 @@
 #include "StdAfx.h"
 #include "misc.h"
 
-Vec3f& fetch(Array2D<Vec3f>& src, Vec2i const& pos)
+vec3& fetch(Array2D<vec3>& src, ivec2 const& pos)
 {
-    static Vec3f black(0.0, 0.0, 0.0);
+    static vec3 black(0.0, 0.0, 0.0);
     if(pos.x < 0 || pos.y < 0 || pos.x >= src.w || pos.y >= src.h) return black;
 	return src(pos);
 }
 
-void aaPoint(Array2D<Vec3f>& dest, Vec2f const& pos, Vec3f const& c) {
+void aaPoint(Array2D<vec3>& dest, vec2 const& pos, vec3 const& c) {
 	int x = (int)pos.x;
 	int y = (int)pos.y;
 	float u_ratio = pos.x - x;
@@ -27,27 +27,28 @@ void aaPoint(Array2D<Vec3f>& dest, Vec2f const& pos, Vec3f const& c) {
 	addr[dest.w + 1] += uv * c;
 }
 
-Matrix33f toHsv;
-Matrix33f toHsvInv;
+mat3 toHsv;
+mat3 toHsvInv;
 int initHsv()
 {
-	toHsv = Matrix33f::createRotation(Vec3f(-1,1,0).normalized(), -acos(Vec3f(1,1,1).normalized().dot(Vec3f(0,0,1))));
-	toHsvInv = toHsv.inverted();
+	auto toHsv44 = glm::rotate(-acos(dot(normalize(vec3(1,1,1)), vec3(0,0,1))), normalize(vec3(-1, 1, 0)));
+	toHsv = mat3(toHsv44);
+	toHsvInv = glm::inverse(toHsv);
 	return 0;
 }
 
 static int ______ = initHsv();
 
 // untested, fast. ok, now tested, seems to work.
-float getSaturation(Vec3f const& v)
+float getSaturation(vec3 const& v)
 {
 	// http://mathworld.wolfram.com/Point-LineDistance3-Dimensional.html
-	static const Vec3f mul = -Vec3f(1, 1, 1).normalized();
-	return v.cross(mul).length();
+	static const vec3 mul = -normalize(vec3(1, 1, 1));
+	return length(cross(v, mul));
 }
 
 // from the matrix.rotate method with hardcoded axis (1, 1, 1)
-void rotateHue_ip( Vec3f& v, float angle )
+void rotateHue_ip( vec3& v, float angle )
 {
 	typedef float T;
 	T sina = math<T>::sin(angle);

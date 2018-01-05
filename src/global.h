@@ -9,5 +9,5 @@ const int windowSize = 600;
 const int windowWidth = windowSize;
 const int windowHeight = windowSize;
 const float windowScale = windowSize / (float)imageSize;
-extern Array2D<Vec4f> pic;
+extern Array2D<vec4> pic;
 extern int framesElapsed;

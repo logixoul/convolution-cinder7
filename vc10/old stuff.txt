@@ -53,9 +53,9 @@ void manipSaturize()
 {
     for(int x=0; x<image.w; x++) {
         for(int y=0;y<image.h; y++) {
-            Vec3f& val = image(x, y);
+            vec3& val = image(x, y);
 
-            Vec3f original = val;
+            vec3 original = val;
             float m = std::min(std::min(val.x, val.y), val.z);
             const float d=20;
             if(m==val.x) val.x /= d;
@@ -129,12 +129,12 @@ glDisable(GL_BLEND);
 
 //////////////////////////////////////
 
-void boxBlur(Array2D<Vec3f> const& in, Array2D<Vec3f>& out, int r)
+void boxBlur(Array2D<vec3> const& in, Array2D<vec3>& out, int r)
 {
 	const float sq = r*2+1;
 	for(int y = 0; y < in.h; y++)
 	{
-		Vec3f sum = Vec3f::zero();
+		vec3 sum = vec3::zero();
 		for(int x = -r; x <= r; x++)
 		{
 			int x_ = max(x, 0);
@@ -146,9 +146,9 @@ void boxBlur(Array2D<Vec3f> const& in, Array2D<Vec3f>& out, int r)
 			sum -= in(0, y);
 			sum += in(x + r + 1, y);
 		}
-		Vec3f* outp = &out(y, r);
-		Vec3f const *rowp = &in(r, y);
-		Vec3f const* endLoop = &in(in.w-r-1, y);
+		vec3* outp = &out(y, r);
+		vec3 const *rowp = &in(r, y);
+		vec3 const* endLoop = &in(in.w-r-1, y);
 		rowp -= r * in.xStep(); endLoop -= r * in.xStep(); int addrAdd = (2 * r + 1) * in.xStep();
 		//for(int x = r; x < in.w - r - 1; x++)
 		for(; rowp < endLoop;)
@@ -168,13 +168,13 @@ void boxBlur(Array2D<Vec3f> const& in, Array2D<Vec3f>& out, int r)
 	}
 }
 
-void newBlur(Array2D<Vec3f>& in, Array2D<Vec3f>& out, int r)
+void newBlur(Array2D<vec3>& in, Array2D<vec3>& out, int r)
 {
 	const float sq = (r+1)*(r+1);
 	for(int y = 0; y < in.h; y++)
 	{
-		Vec3f sum = Vec3f::zero();
-		Vec3f diff = Vec3f::zero();
+		vec3 sum = vec3::zero();
+		vec3 diff = vec3::zero();
 		for(int x = -r; x <= r; x++)
 		{
 			int x_ = max(x, 0);
@@ -222,17 +222,17 @@ void manip()
 {
     for(int x=0; x<image.w; x++) {
         for(int y=0;y<image.h; y++) {
-            Vec3f& val = image(x, y);
-            //val=max(Vec3f(0.0f), val-0.1f);
-            //val = pow(val, Vec3f(1.1f));
-            //val += Vec3f(val.g, val.b, val.r) * pow(sin(0.1f*clock()/(float)CLOCKS_PER_SEC),3);
+            vec3& val = image(x, y);
+            //val=max(vec3(0.0f), val-0.1f);
+            //val = pow(val, vec3(1.1f));
+            //val += vec3(val.g, val.b, val.r) * pow(sin(0.1f*clock()/(float)CLOCKS_PER_SEC),3);
 
             /*float m = std::min(std::min(val.r, val.g), val.b);
             const float d=1.000;
             if(m==val.r) val.r /= d;
             else if(m==val.g) val.g /= d;
             if(m==val.b) val.b /= d;*/
-			if(val != Vec3f::zero())
+			if(val != vec3::zero())
 			{
 				//auto l = length(val);
 				//val = (val / l) * std::min(l, 10000.f);
@@ -266,7 +266,7 @@ void SelectionSort(vector<float*> &num)
 //////////////////////////
 
 template<FetchFunc fetchFunc>
-Vec3f fetchBilinear_(Array2D<Vec3f>& src, Vec2f const& pos) {
+vec3 fetchBilinear_(Array2D<vec3>& src, Vec2f const& pos) {
 	Vec2i intPos(pos);
 	Vec2f uvRatio = pos - intPos;
 	auto at00 = fetchFunc(src, intPos.x,intPos.y);
@@ -278,10 +278,10 @@ Vec3f fetchBilinear_(Array2D<Vec3f>& src, Vec2f const& pos) {
 	return xInterp + (yInterp - xInterp) * uvRatio.y;
 }
 
-/*Vec3f fetchBilinear_noCheck(Array2D<Vec3f>& src, Vec2f const& pos) {
+/*vec3 fetchBilinear_noCheck(Array2D<vec3>& src, Vec2f const& pos) {
 	Vec2i intPos(pos);
 	Vec2f uvRatio = pos - intPos;
-	Vec3f* ptr = &src(intPos);
+	vec3* ptr = &src(intPos);
 	auto at00 = ptr[0];//fetchFunc(src, intPos.x,intPos.y);
 	auto at10 = ptr[1];//fetchFunc(src, intPos.x+1,intPos.y);
 	auto at01 = ptr[src.w];//fetchFunc(src, intPos.x,intPos.y+1);
@@ -292,7 +292,7 @@ Vec3f fetchBilinear_(Array2D<Vec3f>& src, Vec2f const& pos) {
 }*/
 
 
-Vec3f fetchBilinear(Array2D<Vec3f>& src, Vec2f const& pos) {
+vec3 fetchBilinear(Array2D<vec3>& src, Vec2f const& pos) {
 	if(pos.x < 0.0f || pos.y < 0.0f || pos.x >= src.w - 2.0f || pos.y >= src.h - 2.0f)
 	{
 		return fetchBilinear_<fetch1>(src, pos);
@@ -311,7 +311,7 @@ void fluid()
 		GETINT(fluidG, "", 10);
 		GETFLOAT(fluidVelocity, "step=.01", 1);
 		GETFLOAT(fluidSteer, "step=.01", .01);
-		Array2D<Vec3f> result(image.w, image.h, Vec3f::zero());
+		Array2D<vec3> result(image.w, image.h, vec3::zero());
 		static Struct str;
 		float g = 1.f/fluidG;
 		//g *= twoPi;
@@ -325,10 +325,10 @@ void fluid()
 			directions.push_back(offset);
 		}
 		forxy(image) {
-			Vec3f& c = fetch(image, p);
+			vec3& c = fetch(image, p);
 			if(c.x+c.y+c.z < 0.001f)
 				continue;
-			Vec3f ab = str.mat.transformVec(c);
+			vec3 ab = str.mat.transformVec(c);
 			float hue = atan2(ab.y, ab.x);
 			float saturation = ab.xy().length();
 			float brightness = ab.z;
@@ -476,7 +476,7 @@ class Array2D
 		// todo: FFTW_PATIENT
 		static Array2D<V> lum(image.w, image.h);
 		static Array2D<V> out(image.w, image.h);
-		Vec3f toLum(.333, .333, .333);
+		vec3 toLum(.333, .333, .333);
 		for(int i = 0; i < lum.data.size(); i++) lum.data[i] = V(dot(toDraw.data[i], toLum), 0);
 		static FFTPlan<Prec> plan1(lum, out, FFTW_FORWARD, FFTW_MEASURE);
 		static FFTPlan<Prec> plan2(out, lum, FFTW_BACKWARD, FFTW_MEASURE);
@@ -544,7 +544,7 @@ class Array2D
 		PFL(planExecute) planB.execute(out, lum);
 		for(int i = 0; i < lum.area; i++) bloomSurface.data[i].ptr()[channel] = lum.data[i];
 	};
-	boost::thread t(func, 0);
+	std::thread t(func, 0);
 	//func(0);
 	func(1);
 	func(2);

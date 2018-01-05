@@ -18,9 +18,9 @@ struct MortonOrder
 
 struct Vec2s { short x, y; Vec2s(short x, short y) : x(x), y(y) {} };
 
-//float lengthSquared(Vec3f const& v) { return std::max(v.x,std::max(v.y,v.z)); }
-//float lengthSquared(Vec3f const& v) { return v.x+v.y+v.z; }
-float lengthSquared(Vec3f const& v) { return v.lengthSquared(); }
+//float lengthSquared(vec3 const& v) { return std::max(v.x,std::max(v.y,v.z)); }
+//float lengthSquared(vec3 const& v) { return v.x+v.y+v.z; }
+float lengthSquared(vec3 const& v) { return dot(v, v); }
 
 struct Lum { float luminance; Vec2s pos;
 	Lum(float l, Vec2s p) :luminance(l), pos(p){}
@@ -105,14 +105,14 @@ void median(int msize, Image& image)
 	forxy(luminances) luminances(p) = lengthSquared(image(p));
 	GETFLOAT(fpercentile, "min=0 max=1 step=0.1", .5);
 	GETBOOL(useNew, "", false);
-	Vec2i p;
+	ivec2 p;
 	p.x = msize;
 	for(p.y = msize; p.y < image.h -msize; p.y++)
 	{
 		p.x = msize;
 		pvector<Lum> spots(Lum(FLT_MAX, Vec2s(0, 0)));
 		for(int i=-msize;i<=msize;i++)for(int j=-msize;j<=msize;j++)
-			//if(Vec2f(i,j).length() < msize)
+			//if(vec2(i,j).length() < msize)
 			{
 				Vec2s pos(p.x+i, p.y+j);
 				spots.push_back(Lum(luminances(pos.x, pos.y), pos));

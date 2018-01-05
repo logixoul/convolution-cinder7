@@ -3,5 +3,5 @@
 
 Image image(imageSize);
 float zoom = 1;
-Array2D<Vec4f> pic;
+Array2D<vec4> pic;
 int framesElapsed = 0;

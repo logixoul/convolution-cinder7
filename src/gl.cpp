@@ -49,7 +49,7 @@ void Shader::SendConfigUniforms()
 }
 string Shader::shaderStr(string const& in)
 {
-	regex rx("#(.)\\s*\\(\\s*\"(.*?)\"\\s*,\\s*\"(.*?)\"\\s*,\\s*(.*?)\\s*\\)");
+	std::regex rx("#(.)\\s*\\(\\s*\"(.*?)\"\\s*,\\s*\"(.*?)\"\\s*,\\s*(.*?)\\s*\\)");
 	string addedUniforms="";
 	const std::sregex_iterator end;
 	for (std::sregex_iterator iter(in.begin(), in.end(), rx); iter != end; ++iter)
@@ -75,7 +75,7 @@ string Shader::shaderStr(string const& in)
 		}
 	}
 
-	string result = "#version 130\n" + addedUniforms + regex_replace(in, rx, string("$2"));
+	string result = "#version 130\n" + addedUniforms + std::regex_replace(in, rx, string("$2"));
 	return result;
 }
 
